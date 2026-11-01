@@ -1,0 +1,10 @@
+{
+  "title": "Staging",
+  "firstPort": 10001,
+  "consoles": 16,
+  "servers": [
+    { "name": "Konsolenserver 1", "host": "192.0.2.21" },
+    { "name": "Konsolenserver 2", "host": "192.0.2.22" },
+    { "name": "USB-Konsolenserver", "host": "192.0.2.36" }
+  ]
+}

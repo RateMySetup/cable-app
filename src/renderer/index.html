@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:">
+  <title>Cable</title>
+  <link rel="stylesheet" href="../../dist/renderer.css">
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar" class="glass">
+      <div class="side-head">
+        <div class="brand"><span class="logo" aria-hidden="true"></span>Cable</div>
+        <button class="icon" id="btn-settings" title="Einstellungen" aria-label="Einstellungen">⚙︎</button>
+      </div>
+      <div id="side-scroll">
+        <section class="sbox" id="quick-box">
+          <div class="section-head"><span>Verbinden</span></div>
+          <form id="quick" autocomplete="off">
+            <div class="qrow">
+              <select id="q-proto" aria-label="Protokoll">
+                <option value="ssh">SSH</option>
+                <option value="telnet">Telnet</option>
+                <option value="raw">Raw TCP</option>
+              </select>
+              <input id="q-host" spellcheck="false" placeholder="IP / Host" aria-label="IP-Adresse oder Host">
+              <input id="q-port" type="number" min="1" max="65535" value="22" aria-label="Port" title="Port">
+            </div>
+            <div class="qrow2">
+              <input id="q-user" spellcheck="false" placeholder="Benutzer" aria-label="Benutzer" autocomplete="off">
+              <input id="q-pass" type="password" placeholder="Passwort" aria-label="Passwort" autocomplete="new-password">
+            </div>
+            <div class="qrow2">
+              <button type="submit" class="primary" id="q-go">Verbinden</button>
+              <button type="button" id="q-save" title="Diese Angaben als Profil speichern">Als Profil …</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="sbox" id="open-box">
+          <div class="section-head"><span id="open-title">Offene Sitzungen</span>
+            <span class="head-acts">
+              <button class="link" id="btn-sel-all" title="Alle offenen Sitzungen auswählen">Alle</button>
+              <button class="link" id="btn-sel-none" title="Auswahl aufheben">Keine</button>
+              <button class="link" id="btn-group-from-sel" title="Ausgewählte Sitzungen als Gruppe speichern">Als Gruppe</button>
+            </span>
+          </div>
+          <div id="open-list" class="muted small">Noch keine Verbindung.</div>
+        </section>
+
+        <section class="sbox" id="staging-box" hidden>
+          <div class="section-head fold" id="staging-head" role="button" tabindex="0" aria-expanded="true"><span><span class="chev" id="staging-chev">▾</span> <span id="staging-title">Staging</span></span><span class="muted small" id="staging-ports"></span></div>
+          <div id="staging-list"></div>
+        </section>
+
+        <section class="sbox" id="group-box">
+          <div class="section-head"><span>Gruppen</span><button class="link" id="btn-group-new">+ Gruppe</button></div>
+          <div id="group-list" class="muted small"></div>
+        </section>
+
+        <section class="sbox" id="profile-box">
+          <div class="section-head"><span>Profile</span>
+            <span class="head-acts"><button class="link" id="btn-new">+ Profil</button><button class="link" id="btn-local">Shell</button></span>
+          </div>
+          <input id="search" type="search" placeholder="Profile suchen" aria-label="Profile suchen">
+          <nav id="tree" aria-label="Profile"></nav>
+        </section>
+
+        <section class="sbox" id="serial-box">
+          <div class="section-head"><span>Konsolenkabel</span><button class="link" id="btn-serial-refresh">Neu suchen</button></div>
+          <div id="serial-list" class="muted small">–</div>
+        </section>
+      </div>
+    </aside>
+    <main id="main">
+      <header id="tabbar" class="glass">
+        <div id="tabstrip">
+          <button class="icon tabs-arrow" id="tabs-left" title="Tabs nach links" aria-label="Tabs nach links" hidden>‹</button>
+          <div id="tabs" role="tablist"></div>
+          <button class="icon tabs-arrow" id="tabs-right" title="Tabs nach rechts" aria-label="Tabs nach rechts" hidden>›</button>
+        </div>
+        <div class="tools">
+          <div class="seg" id="view-seg" role="group" aria-label="Anordnung">
+            <button data-view="grid" title="Alle Sitzungen dieses Tabs als Kacheln, wie eine Kamerawand (⌘1)">Raster</button>
+            <button data-view="cols" title="Alle Sitzungen dieses Tabs nebeneinander (⌘2)">Spalten</button>
+            <button data-view="rows" title="Alle Sitzungen dieses Tabs untereinander (⌘3)">Zeilen</button>
+            <button data-view="focus" title="Eine Sitzung dieses Tabs groß, die anderen über Liste wählen (⌘4)">Fokus</button>
+          </div>
+          <button id="btn-split" title="Weitere Sitzung zum selben Gerät in diesem Tab (⌘D)">+ Bereich</button>
+          <button id="btn-broadcast" title="Eingabe an mehrere Sitzungen (⌘⇧B)">An mehrere</button>
+          <button id="btn-snippets" title="Befehlsbausteine (⌘⇧S)">Bausteine</button>
+          <button id="btn-tftp" title="TFTP-Server (⌘⇧T)"><span class="dot" id="tftp-dot"></span>TFTP</button>
+          <button id="btn-break" title="Break senden (⌘⇧K)">Break</button>
+        </div>
+      </header>
+      <div id="workspace">
+        <div id="panes-host"></div>
+        <div id="empty" class="empty">
+          <div class="empty-card glass">
+            <h1>Verbindung öffnen</h1>
+            <p>Links IP, Benutzer und Passwort eintragen und „Verbinden“ – oder ein Profil doppelklicken.</p>
+            <ul>
+              <li><kbd>⌘K</kbd> Verbinden-Feld</li>
+              <li><kbd>⌘N</kbd> neues Profil · <kbd>⌘T</kbd> lokale Shell</li>
+              <li><kbd>⌘⇧B</kbd> an mehrere Sitzungen senden</li>
+              <li><kbd>⌘1</kbd>–<kbd>⌘4</kbd> Raster, Spalten, Zeilen, Fokus</li>
+            </ul>
+          </div>
+        </div>
+        <aside id="snippets" class="glass" hidden>
+          <div class="section-head"><span>Bausteine</span><button class="link" id="btn-snippets-edit">Bearbeiten</button></div>
+          <div id="snippet-target" class="muted small"></div>
+          <input id="snippet-search" type="search" placeholder="Baustein suchen" aria-label="Baustein suchen">
+          <div id="snippet-list"></div>
+          <p class="muted small hint">Klick sendet mit Enter. ⌥-Klick schreibt nur in die Zeile.</p>
+        </aside>
+      </div>
+      <footer id="multibar" class="glass" hidden>
+        <span class="mb-label">An mehrere</span>
+        <div class="seg" id="scope-seg" role="group" aria-label="Ziel">
+          <button data-scope="selected">Ausgewählte <b id="n-selected">0</b></button>
+          <button data-scope="tab">Dieser Tab <b id="n-tab">0</b></button>
+          <button data-scope="all">Alle offenen <b id="n-all">0</b></button>
+        </div>
+        <input id="mb-input" spellcheck="false" placeholder="Befehl an alle Ziele – Enter sendet" aria-label="Befehl an alle Ziele">
+        <button id="mb-send" class="danger-solid">Senden</button>
+        <button id="mb-rec" title="Alle Ziele aufzeichnen">● Aufzeichnen</button>
+        <button id="mb-off" class="icon" title="An mehrere aus" aria-label="An mehrere aus">✕</button>
+      </footer>
+    </main>
+  </div>
+  <div id="modal-root"></div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="../../dist/renderer.js"></script>
+</body>
+</html>

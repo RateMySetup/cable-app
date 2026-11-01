@@ -1,0 +1,90 @@
+{
+  "name": "cable",
+  "productName": "Cable",
+  "version": "0.5.0",
+  "description": "SSH, Telnet, Serial, Raw, lokale Shell und TFTP-Server in einem Fenster – PuTTY-Alternative für macOS",
+  "main": "src/main/main.js",
+  "author": "RateMySetup",
+  "license": "MIT",
+  "homepage": "https://github.com/RateMySetup/cable-app",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RateMySetup/cable-app.git"
+  },
+  "private": true,
+  "scripts": {
+    "build:renderer": "node scripts/build-info.js && esbuild src/renderer/app.js --bundle --outfile=dist/renderer.js --format=iife --platform=browser --target=chrome130 --loader:.css=css",
+    "start": "npm run build:renderer && electron .",
+    "test": "node --test test/*.test.js",
+    "rebuild": "electron-rebuild -f -o node-pty,@serialport/bindings-cpp",
+    "dist:mac": "npm run build:renderer && electron-builder --mac dmg zip --arm64 --x64",
+    "dist:linux": "npm run build:renderer && electron-builder --linux dir",
+    "setup": "npm ci --omit=optional && npm run rebuild",
+    "test:e2e": "node test/e2e/gui.e2e.js",
+    "dist:mac:local": "npm run build:renderer && electron-builder --mac dir --arm64",
+    "install:local": "bash scripts/install-local.sh",
+    "update:local": "bash scripts/install-local.sh --pull",
+    "publish:public": "bash scripts/publish-public.sh"
+  },
+  "dependencies": {
+    "node-pty": "1.1.0",
+    "serialport": "13.0.0",
+    "ssh2": "1.17.0"
+  },
+  "devDependencies": {
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/addon-search": "0.16.0",
+    "@xterm/xterm": "6.0.0",
+    "electron": "43.7.7",
+    "electron-builder": "26.15.3",
+    "esbuild": "0.28.2",
+    "playwright-core": "^1.63.0"
+  },
+  "build": {
+    "appId": "io.github.ratemysetup.cable",
+    "productName": "Cable",
+    "files": [
+      "src/main/**",
+      "src/core/**",
+      "src/preload/**",
+      "src/renderer/index.html",
+      "dist/**",
+      "package.json"
+    ],
+    "protocols": [
+      {
+        "name": "Cable",
+        "schemes": [
+          "cable",
+          "kabel"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "identity": null,
+      "hardenedRuntime": false,
+      "extendInfo": {
+        "NSAppleEventsUsageDescription": "Cable öffnet Verbindungen aus Links.",
+        "NSLocalNetworkUsageDescription": "Cable verbindet sich mit Geräten im lokalen Netz (SSH, Telnet, TFTP)."
+      }
+    },
+    "linux": {
+      "target": [
+        "dir"
+      ]
+    },
+    "npmRebuild": false,
+    "asarUnpack": [
+      "node_modules/node-pty/**",
+      "node_modules/@serialport/bindings-cpp/**"
+    ],
+    "directories": {
+      "output": "release"
+    }
+  }
+}
