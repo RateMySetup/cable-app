@@ -24,7 +24,8 @@
     "dist:mac:local": "npm run build:renderer && electron-builder --mac dir --arm64",
     "install:local": "bash scripts/install-local.sh",
     "update:local": "bash scripts/install-local.sh --pull",
-    "publish:public": "bash scripts/publish-public.sh"
+    "publish:public": "bash scripts/publish-public.sh",
+    "dist:release": "CABLE_RELEASE=1 npm run build:renderer && electron-builder --mac dmg --arm64"
   },
   "dependencies": {
     "node-pty": "1.1.0",
@@ -85,6 +86,7 @@
     ],
     "directories": {
       "output": "release"
-    }
+    },
+    "afterPack": "scripts/after-pack.js"
   }
 }

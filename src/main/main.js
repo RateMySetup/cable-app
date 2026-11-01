@@ -370,8 +370,8 @@ function showAbout() {
 async function checkUpdates() {
   const dir = sourceDir();
   if (!dir) {
-    const r = dialog.showMessageBoxSync(win, { type: 'info', message: 'Kein lokaler Quellordner bekannt', detail: `Diese App wurde nicht aus einem Git-Klon gebaut. Neue Versionen gibt es im Repo:\n${REPO_URL}`, buttons: ['OK', 'Repo öffnen'] });
-    if (r === 1) shell.openExternal(REPO_URL);
+    const r = dialog.showMessageBoxSync(win, { type: 'info', message: 'Kein lokaler Quellordner bekannt', detail: `Diese App wurde nicht aus einem Git-Klon gebaut. Neue Versionen gibt es hier:\n${REPO_URL}/releases`, buttons: ['OK', 'Repo öffnen'] });
+    if (r === 1) shell.openExternal(`${REPO_URL}/releases`);
     return;
   }
   let behind = 0, ahead = 0, dirty = false, fetchErr = '';

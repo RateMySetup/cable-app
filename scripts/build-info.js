@@ -7,6 +7,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
+// CABLE_RELEASE=1: Build zum Weitergeben (DMG im GitHub-Release) – ohne lokalen Quellordner.
+const release = process.env.CABLE_RELEASE === '1';
 const pkg = require(path.join(root, 'package.json'));
 
 function git(...args) {
@@ -19,7 +21,7 @@ const info = {
   commit: git('rev-parse', 'HEAD'),
   branch: git('rev-parse', '--abbrev-ref', 'HEAD'),
   dirty: git('status', '--porcelain', '--untracked-files=no') !== '',
-  sourceDir: git('rev-parse', '--show-toplevel') ? root : '',
+  sourceDir: !release && git('rev-parse', '--show-toplevel') ? root : '',
   builtAt: new Date().toISOString(),
 };
 

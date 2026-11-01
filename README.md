@@ -34,9 +34,11 @@ Läuft unter macOS (Apple Silicon und Intel), dazu auch unter Linux und Windows.
 
 Cable ist nicht von Apple signiert. Darum einmal den Quarantäne-Vermerk entfernen.
 
-**Mit fertiger DMG** (falls du eine bekommen hast):
+**Mit fertiger DMG** (Apple Silicon, M1 und neuer):
 
-1. `Cable-<Version>-arm64.dmg` (Apple Silicon) bzw. `-x64` (Intel) öffnen und Cable nach `Programme` ziehen.
+1. Unter [Releases](https://github.com/RateMySetup/cable-app/releases) die neueste `Cable-<Version>-arm64.dmg`
+   laden, öffnen und Cable nach `Programme` ziehen. Für Intel-Macs gibt es noch keine DMG – dort aus dem
+   Quellcode bauen.
 2. Im Terminal:
    ```bash
    xattr -dr com.apple.quarantine /Applications/Cable.app
