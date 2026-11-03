@@ -167,6 +167,27 @@ function sanitizeTftp(v) {
   };
 }
 
+/** SCP: Server-Freigabe und zuletzt benutztes Ziel. Passwörter nie (nur für den Lauf im Speicher). */
+function sanitizeScp(v) {
+  const t = v || {};
+  const c = t.client || {};
+  const port = Number(t.port);
+  const cport = Number(c.port);
+  return {
+    root: clip(t.root, 500) || '',
+    port: Number.isInteger(port) && port >= 1 && port <= 65535 ? port : 22,
+    allowWrite: Boolean(t.allowWrite),
+    username: clip(t.username, 64) || 'cable',
+    client: {
+      host: clip(c.host, 253) || '',
+      port: Number.isInteger(cport) && cport >= 1 && cport <= 65535 ? cport : 22,
+      username: clip(c.username, 64) || '',
+      remote: clip(c.remote, 300) || 'flash:',
+      legacy: Boolean(c.legacy),
+    },
+  };
+}
+
 class Store {
   /**
    * @param {string} dir App-Datenordner
@@ -186,6 +207,7 @@ class Store {
     this.data.rules = migrateRules(this.data.rules);
     this.data.settings ??= { fontSize: 13, theme: 'auto', logDir: '', scrollback: 10000 };
     this.data.tftp = sanitizeTftp(this.data.tftp);
+    this.data.scp = sanitizeScp(this.data.scp);
     if ((this.data.snippetsVersion || 1) < SNIPPETS_VERSION) {
       const have = new Set(this.data.snippets.map((x) => x.id));
       this.data.snippets.push(...DEFAULT_SNIPPETS.filter((x) => !have.has(x.id)));
@@ -207,7 +229,7 @@ class Store {
   save() { this.write(this.file, this.data); }
 
   all() {
-    return { sessions: this.data.sessions, groups: this.data.groups, snippets: this.data.snippets, rules: this.data.rules, settings: this.data.settings, tftp: this.data.tftp, canStoreSecrets: this.crypt.available() };
+    return { sessions: this.data.sessions, groups: this.data.groups, snippets: this.data.snippets, rules: this.data.rules, settings: this.data.settings, tftp: this.data.tftp, scp: this.data.scp, canStoreSecrets: this.crypt.available() };
   }
 
   /** Profil speichern; `raw.password` landet nur verschlüsselt in secrets.json und nur mit „merken“. */
@@ -237,6 +259,7 @@ class Store {
   }
 
   setTftp(v) { this.data.tftp = sanitizeTftp(v); this.save(); return this.data.tftp; }
+  setScp(v) { this.data.scp = sanitizeScp({ ...this.data.scp, ...v, client: { ...this.data.scp.client, ...(v.client || {}) } }); this.save(); return this.data.scp; }
 
   importSessions(list) {
     let added = 0;

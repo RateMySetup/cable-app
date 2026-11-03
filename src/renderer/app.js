@@ -1,6 +1,6 @@
 // Oberfläche von Cable: Verbinden-Formular, offene Sitzungen mit Auswahl, Gruppen, Profile, Tabs mit
 // Bereichen in vier Anordnungen (Raster, Spalten, Zeilen, Fokus), „An mehrere“, Bausteine, Aufzeichnen,
-// TFTP-Server. Kein Framework – kleiner DOM-Code, Zustand in `state`.
+// TFTP- und SCP-Server, SCP-Kopie. Kein Framework – kleiner DOM-Code, Zustand in `state`.
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
@@ -31,6 +31,7 @@ const state = {
   multi: { on: false, scope: 'selected', rec: false },
   selected: null,
   tftp: { running: false, addresses: [], events: [] },
+  scp: { running: false, addresses: [], events: [], client: {} },
   closedFolders: new Set(JSON.parse(localStorageGet('closedFolders') || '[]')),
   closedSnippetGroups: new Set(JSON.parse(localStorageGet('closedSnippetGroups') || '[]')),
   openPerlen: new Set(JSON.parse(localStorageGet('openPerlen') || '[]')),
@@ -492,8 +493,15 @@ function newPane(tab, session) {
     const text = await navigator.clipboard.readText().catch(() => '');
     if (text) pastePane(pane, text);
   });
+  // ⌘V löst das native paste-Event aus (Menü „Bearbeiten“); nur das wird ausgewertet, sonst kommt der Text doppelt.
+  termBox.addEventListener('paste', (e) => {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const text = e.clipboardData ? e.clipboardData.getData('text/plain') : '';
+    if (text) pastePane(pane, text);
+  }, true);
   term.attachCustomKeyEventHandler((e) => {
-    if (e.type === 'keydown' && e.metaKey && e.key === 'v') { navigator.clipboard.readText().then((t) => t && pastePane(pane, t)); return false; }
+    if (e.type === 'keydown' && e.metaKey && e.key === 'v') return false;
     if (e.type === 'keydown' && e.metaKey && e.key === 'c' && term.hasSelection()) return false;
     return true;
   });
@@ -1131,6 +1139,141 @@ async function tftpDialog() {
   await modal('TFTP-Server', body, [{ label: 'Schließen', value: null, cls: 'primary' }], { wide: true, onClose: off });
 }
 
+// ---------- SCP ----------
+// Passwörter nur im Speicher dieser Sitzung (für erneutes Öffnen des Dialogs), nie auf der Platte.
+const scpMem = { tab: 'copy', direction: 'put', clientPass: '', serverPass: '', local: '', save: '', getRemote: '' };
+async function scpDialog() {
+  try { state.scp = await api.scpStatus(); } catch (e) { toast(e.message); return; }
+  const srvCfg = { root: state.scp.root || '', port: state.scp.port || 22, allowWrite: Boolean(state.scp.allowWrite), username: state.scp.username || 'cable' };
+  const fp = focusedPane();
+  const cli = { ...state.scp.client };
+  if (fp && fp.session && fp.session.host && ['ssh', 'telnet'].includes(fp.session.protocol) && !cli.host) {
+    cli.host = fp.session.host;
+    if (fp.session.username) cli.username = fp.session.username;
+  }
+  const body = el('div', { class: 'body' });
+  const events = el('div', { class: 'events', 'aria-live': 'polite' });
+  const bar = el('progress', { max: 1, value: 0, style: 'width:100%' });
+  const barText = el('div', { class: 'muted small' }, '');
+  let busy = state.scp.busy;
+  const drawEvents = () => {
+    const list = state.scp.events || [];
+    events.replaceChildren(...(list.length ? list.slice().reverse().map((e) => el('div', { class: e.kind }, `${new Date(e.ts).toTimeString().slice(0, 8)}  ${e.text}`)) : [el('span', { class: 'muted' }, 'Noch keine Übertragung.')]));
+  };
+  const copy = (t) => navigator.clipboard.writeText(t).then(() => toast('Kopiert'));
+  const mb = (n) => `${(n / 1048576).toFixed(n < 10485760 ? 1 : 0)} MB`;
+  const tabs = () => el('div', { class: 'seg', role: 'group', 'aria-label': 'SCP-Bereich' },
+    el('button', { class: scpMem.tab === 'copy' ? 'on' : '', onclick: () => { scpMem.tab = 'copy'; draw(); } }, 'Kopieren'),
+    el('button', { class: scpMem.tab === 'server' ? 'on' : '', onclick: () => { scpMem.tab = 'server'; draw(); } }, `Server${state.scp.running ? ' ●' : ''}`));
+
+  const drawCopy = () => {
+    const put = scpMem.direction === 'put';
+    const inp = (key, attrs = {}) => el('input', { spellcheck: 'false', value: cli[key] ?? '', disabled: busy, oninput: (e) => { cli[key] = attrs.type === 'number' ? Number(e.target.value) : e.target.value; }, ...attrs });
+    return [
+      el('div', { class: 'seg', role: 'group', 'aria-label': 'Richtung' },
+        el('button', { class: put ? 'on' : '', disabled: busy, onclick: () => { scpMem.direction = 'put'; draw(); } }, 'Mac → Gerät'),
+        el('button', { class: put ? '' : 'on', disabled: busy, onclick: () => { scpMem.direction = 'get'; draw(); } }, 'Gerät → Mac')),
+      el('div', { class: 'row3' },
+        field('Ziel-IP / Host', inp('host', { placeholder: 'z. B. 10.0.0.10' })),
+        field('Port', inp('port', { type: 'number', min: 1, max: 65535 })),
+        el('label', { class: 'check', style: 'align-self:end' }, el('input', { type: 'checkbox', checked: Boolean(cli.legacy), disabled: busy, onchange: (e) => { cli.legacy = e.target.checked; } }), 'Alte Algorithmen')),
+      el('div', { class: 'row2' },
+        field('Benutzer', inp('username', { autocomplete: 'off' })),
+        field('Passwort', el('input', { type: 'password', autocomplete: 'new-password', value: scpMem.clientPass, disabled: busy, oninput: (e) => { scpMem.clientPass = e.target.value; } }))),
+      put
+        ? el('div', { class: 'row2' },
+          field('Datei auf dem Mac', el('div', { style: 'display:flex;gap:6px' },
+            el('input', { value: scpMem.local, disabled: busy, spellcheck: 'false', placeholder: 'z. B. cat9k_iosxe.17.15.03.SPA.bin', oninput: (e) => { scpMem.local = e.target.value; } }),
+            el('button', { disabled: busy, onclick: async () => { const f = await api.scpPickFile(); if (f) { scpMem.local = f; draw(); } } }, 'Wählen …'))),
+          field('Ziel auf dem Gerät', inp('remote', { placeholder: 'flash:' })))
+        : el('div', { class: 'row2' },
+          field('Datei auf dem Gerät', el('input', { value: scpMem.getRemote, disabled: busy, spellcheck: 'false', placeholder: 'z. B. flash:/sw1-confg.txt', oninput: (e) => { scpMem.getRemote = e.target.value; } })),
+          field('Speichern unter', el('div', { style: 'display:flex;gap:6px' },
+            el('input', { value: scpMem.save, disabled: busy, spellcheck: 'false', oninput: (e) => { scpMem.save = e.target.value; } }),
+            el('button', { disabled: busy, onclick: async () => { const f = await api.scpPickSave((scpMem.getRemote.split(/[/:]/).pop()) || 'datei'); if (f) { scpMem.save = f; draw(); } } }, 'Wählen …')))),
+      el('div', { style: 'display:flex;gap:8px;align-items:center' },
+        busy ? el('button', { class: 'danger', onclick: () => api.scpCancel() }, 'Abbrechen') : el('button', { class: 'primary', onclick: runCopy }, 'Kopieren'),
+        el('div', { style: 'flex:1;display:grid;gap:2px' }, bar, barText)),
+      el('p', { class: 'muted small' }, put
+        ? 'Cisco IOS-XE braucht vorher „ip scp server enable“ und einen Benutzer mit privilege 15. Ziel „flash:“ übernimmt den Dateinamen. Danach z. B. „verify /md5 flash:<Datei>“.'
+        : 'Holt eine Datei vom Gerät, z. B. eine Config oder ein Crashinfo. Vorhandene Dateien auf dem Mac werden nicht überschrieben.'),
+    ];
+  };
+  async function runCopy() {
+    const put = scpMem.direction === 'put';
+    busy = true; bar.value = 0; barText.textContent = 'Verbinde …'; draw();
+    try {
+      const r = await api.scpCopy({ direction: scpMem.direction, host: cli.host, port: cli.port, username: cli.username, password: scpMem.clientPass, legacy: cli.legacy,
+        local: put ? scpMem.local : scpMem.save, remote: put ? cli.remote : scpMem.getRemote });
+      bar.value = 1; barText.textContent = `Fertig – ${mb(r.size)}`;
+      toast('SCP-Übertragung fertig');
+    } catch (e) { barText.textContent = e.message; toast(e.message); }
+    busy = false; draw();
+  }
+
+  const drawServer = () => {
+    const on = state.scp.running;
+    const ip = state.scp.addresses[0] ? state.scp.addresses[0].address : '<IP dieses Macs>';
+    const u = srvCfg.username || 'cable';
+    const examples = [
+      `copy scp://${u}@${ip}/<Datei> flash:`,
+      ...(srvCfg.allowWrite ? [`copy running-config scp://${u}@${ip}/<hostname>-confg.txt`] : []),
+    ];
+    return [
+      el('p', { class: on ? 'infobox' : 'muted small' }, on
+        ? `Läuft auf Port ${state.scp.port} – ${state.scp.allowWrite ? 'Geräte können laden und hochladen' : 'Geräte können nur laden'}. Anmeldung nur mit Benutzer „${state.scp.username}“ und dem Passwort von hier.`
+        : 'Gibt einen Ordner per SCP frei: der Switch holt sich Images oder sichert Configs selbst. Standard: nur lesen. Hochladen nur mit Häkchen; vorhandene Dateien werden nie überschrieben.'),
+      el('div', { class: 'row3' },
+        field('Ordner', el('div', { style: 'display:flex;gap:6px' },
+          el('input', { value: srvCfg.root, disabled: on, spellcheck: 'false', oninput: (e) => { srvCfg.root = e.target.value; } }),
+          el('button', { disabled: on, onclick: async () => { const d = await api.scpPick(); if (d) { srvCfg.root = d; draw(); } } }, 'Wählen …'))),
+        field('Port', el('input', { type: 'number', min: 1, max: 65535, value: srvCfg.port, disabled: on, oninput: (e) => { srvCfg.port = Number(e.target.value); } })),
+        el('div', { style: 'display:flex;align-items:end' }, on ? el('button', { class: 'danger', style: 'width:100%', onclick: stopSrv }, 'Stoppen') : el('button', { class: 'primary', style: 'width:100%', onclick: startSrv }, 'Starten'))),
+      el('div', { class: 'row2' },
+        field('Benutzer für Geräte', el('input', { value: srvCfg.username, disabled: on, spellcheck: 'false', autocomplete: 'off', oninput: (e) => { srvCfg.username = e.target.value; } })),
+        field('Passwort für Geräte', el('input', { type: 'password', value: scpMem.serverPass, disabled: on, autocomplete: 'new-password', oninput: (e) => { scpMem.serverPass = e.target.value; } }))),
+      el('label', { class: 'check' }, el('input', { type: 'checkbox', checked: srvCfg.allowWrite, disabled: on, onchange: (e) => { srvCfg.allowWrite = e.target.checked; draw(); } }), 'Hochladen erlauben (Gerät → Mac, z. B. „copy running-config scp:“)'),
+      el('div', {}, el('div', { class: 'section-head', style: 'margin-bottom:6px' }, el('span', {}, 'Adressen dieses Macs'), el('button', { class: 'link', disabled: !srvCfg.root, onclick: () => api.scpReveal() }, 'Ordner im Finder')),
+        el('div', { class: 'addr' }, state.scp.addresses.length ? state.scp.addresses.map((a) => el('button', { title: `${a.name} – kopieren`, onclick: () => copy(a.address) }, `${a.address}  ${a.name}`)) : el('span', { class: 'muted small' }, 'Keine Netzwerkadresse gefunden.'))),
+      el('div', { style: 'display:grid;gap:6px' }, el('div', { class: 'section-head' }, el('span', {}, 'Befehle am Switch')),
+        examples.map((x) => el('div', { class: 'cmdline' }, el('code', {}, x), el('button', { onclick: () => copy(x) }, 'Kopieren'))),
+        srvCfg.port !== 22 ? el('p', { class: 'muted small' }, 'Switches verbinden sich für scp:// meist nur über Port 22.') : null),
+    ];
+  };
+  async function startSrv() {
+    try { state.scp = await api.scpStart({ ...srvCfg, password: scpMem.serverPass }); toast('SCP-Server läuft'); } catch (e) { toast(e.message); }
+    renderScpDot(); draw();
+  }
+  async function stopSrv() {
+    try { state.scp = await api.scpStop(); toast('SCP-Server gestoppt'); } catch (e) { toast(e.message); }
+    renderScpDot(); draw();
+  }
+
+  const draw = () => {
+    body.replaceChildren(tabs(), ...(scpMem.tab === 'copy' ? drawCopy() : drawServer()),
+      el('div', { style: 'display:grid;gap:6px' }, el('div', { class: 'section-head' }, el('span', {}, 'Übertragungen')), events));
+    drawEvents();
+  };
+  const offEv = api.onScp((e) => {
+    const list = state.scp.events || [];
+    // Start/Stop liefern den Stand samt Ereignissen zurück; dasselbe Ereignis kommt zusätzlich live.
+    if (list.some((x) => x.ts === e.ts && x.text === e.text)) return;
+    state.scp.events = [...list, e].slice(-80);
+    drawEvents();
+  });
+  const offProg = api.onScpProgress((p) => {
+    bar.max = p.total || 1; bar.value = p.done;
+    barText.textContent = `${mb(p.done)} von ${mb(p.total)} · ${(p.rate / 1048576).toFixed(1)} MB/s`;
+  });
+  draw();
+  await modal('SCP', body, [{ label: 'Schließen', value: null, cls: 'primary' }], { wide: true, onClose: () => { offEv(); offProg(); } });
+}
+
+function renderScpDot() {
+  $('#scp-dot').classList.toggle('on', Boolean(state.scp && state.scp.running));
+  $('#btn-scp').title = state.scp && state.scp.running ? `SCP-Server läuft (Port ${state.scp.port})` : 'SCP: Dateien kopieren, SCP-Server (⌘⇧U)';
+}
+
 function renderTftpDot() {
   $('#tftp-dot').classList.toggle('on', Boolean(state.tftp.running));
   $('#btn-tftp').title = state.tftp.running ? `TFTP-Server läuft (Port ${state.tftp.port})` : 'TFTP-Server (⌘⇧T)';
@@ -1294,7 +1437,7 @@ api.onMenu((cmd) => {
     'next-tab': () => cycleTab(1), 'prev-tab': () => cycleTab(-1),
     'view-grid': () => setLayout('grid'), 'view-cols': () => setLayout('cols'), 'view-rows': () => setLayout('rows'), 'view-focus': () => setLayout('focus'),
     'merge-tabs': mergeTabs,
-    tftp: tftpDialog, snippets: toggleSnippets,
+    tftp: tftpDialog, scp: scpDialog, snippets: toggleSnippets,
     'update-building': () => toast('Cable wird im Hintergrund neu gebaut – Sitzungen bleiben offen'),
     'font-up': () => { state.data.settings.fontSize = Math.min(28, state.data.settings.fontSize + 1); applyTheme(); api.saveSettings({ fontSize: state.data.settings.fontSize }); },
     'font-down': () => { state.data.settings.fontSize = Math.max(9, state.data.settings.fontSize - 1); applyTheme(); api.saveSettings({ fontSize: state.data.settings.fontSize }); },
@@ -1351,6 +1494,7 @@ $('#btn-break').addEventListener('click', sendBreak);
 $('#btn-snippets').addEventListener('click', toggleSnippets);
 $('#btn-snippets-edit').addEventListener('click', editSnippets);
 $('#btn-tftp').addEventListener('click', tftpDialog);
+$('#btn-scp').addEventListener('click', scpDialog);
 $('#scope-seg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { state.multi.scope = b.dataset.scope; refreshAll(); $('#mb-input').focus(); } });
 $('#mb-input').addEventListener('keydown', multiBarKeys);
 $('#mb-send').addEventListener('click', () => { const i = $('#mb-input'); sendLineToTargets(i.value); if (i.value.trim()) mbHistory.push(i.value); mbIndex = mbHistory.length; i.value = ''; i.focus(); });
@@ -1367,5 +1511,6 @@ reload().then(async () => {
   refreshSerial();
   renderTabs();
   try { state.tftp = await api.tftpStatus(); renderTftpDot(); } catch { /* egal */ }
+  try { state.scp = await api.scpStatus(); renderScpDot(); } catch { /* egal */ }
   api.ready();
 });

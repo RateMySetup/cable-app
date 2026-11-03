@@ -1,6 +1,6 @@
 'use strict';
 // Electron-Hauptprozess: Fenster, Verbindungen, Speicher, Rückfragen an die Oberfläche, cable://-Links,
-// Aufzeichnung und Export, TFTP-Server.
+// Aufzeichnung und Export, TFTP-Server, SCP (Server und Kopie).
 // Die Oberfläche hat keinen Node-Zugriff (contextIsolation + sandbox); alles läuft über preload.js.
 
 const { app, BrowserWindow, ipcMain, dialog, safeStorage, shell, Menu, nativeTheme } = require('electron');
@@ -17,6 +17,7 @@ const { parseCableUrl, parseQuick } = require('../core/cableurl');
 const { SessionLog, stamp, safeName } = require('../core/logger');
 const { AutoLogin } = require('../core/autologin');
 const { TftpServer, localAddresses } = require('../core/tftp');
+const { ScpServer, transfer: scpTransfer, fmtSize } = require('../core/scp');
 const { parseStaging } = require('../core/staging');
 
 let win = null;
@@ -30,6 +31,9 @@ let pendingUrls = [];
 let askSeq = 0;
 let tftp = null; // laufender TftpServer
 let tftpEvents = [];
+let scp = null; // laufender ScpServer
+let scpEvents = [];
+let scpJob = null; // laufende Client-Übertragung {abort: AbortController}
 
 const crypt = {
   available: () => safeStorage.isEncryptionAvailable(),
@@ -189,6 +193,73 @@ function tftpStop() {
   return tftpStatus();
 }
 
+function scpLog(e) { scpEvents.push(e); scpEvents = scpEvents.slice(-200); send('scp:event', e); }
+
+function scpStatus() {
+  const c = store.data.scp;
+  return {
+    running: Boolean(scp), root: scp ? scp.root : c.root, port: scp ? scp.port : c.port, allowWrite: scp ? scp.allowWrite : c.allowWrite,
+    username: scp ? scp.username : c.username, client: c.client, busy: Boolean(scpJob), addresses: localAddresses(), events: scpEvents.slice(-80),
+  };
+}
+
+async function scpStart(v) {
+  if (scp) throw new Error('SCP-Server läuft schon');
+  const password = String(v.password || '');
+  const cfg = store.setScp({ root: v.root, port: v.port, allowWrite: v.allowWrite, username: v.username });
+  if (!cfg.root) throw new Error('Erst einen Ordner wählen');
+  if (!fs.existsSync(cfg.root)) throw new Error(`Ordner existiert nicht: ${cfg.root}`);
+  if (password.length < 4) throw new Error('Passwort für den SCP-Server angeben (mindestens 4 Zeichen)');
+  const srv = new ScpServer({ root: cfg.root, port: cfg.port, allowWrite: cfg.allowWrite, username: cfg.username, password, hostKeyFile: path.join(dataDir, 'scp-hostkey.pem') });
+  srv.on('event', scpLog);
+  scpEvents = [];
+  await srv.start();
+  scp = srv;
+  return scpStatus();
+}
+
+function scpStop() {
+  if (scp) { scp.stop(); scp = null; scpLog({ ts: Date.now(), text: 'SCP-Server gestoppt', kind: 'info' }); }
+  return scpStatus();
+}
+
+/** Einmalige Übertragung Mac ↔ Gerät. Passwort nur für diesen Aufruf, es wird nicht gespeichert. */
+async function scpCopy(v) {
+  if (scpJob) throw new Error('Es läuft schon eine Übertragung');
+  const direction = v.direction === 'get' ? 'get' : 'put';
+  const host = String(v.host || '').trim();
+  const remote = String(v.remote || '').trim();
+  const local = String(v.local || '');
+  if (!host) throw new Error('Ziel-IP fehlt');
+  if (!v.username) throw new Error('Benutzer fehlt');
+  if (!remote) throw new Error(direction === 'put' ? 'Zielpfad auf dem Gerät fehlt' : 'Datei auf dem Gerät fehlt');
+  if (!local) throw new Error(direction === 'put' ? 'Erst eine Datei wählen' : 'Erst den Speicherort wählen');
+  if (direction === 'put' && !fs.existsSync(local)) throw new Error(`Datei nicht gefunden: ${local}`);
+  if (direction === 'get' && fs.existsSync(local)) throw new Error(`${path.basename(local)} gibt es schon`);
+  const port = Number(v.port) || 22;
+  store.setScp({ client: { host, port, username: v.username, remote: direction === 'put' ? v.remote : store.data.scp.client.remote, legacy: Boolean(v.legacy) } });
+  const abort = new AbortController();
+  scpJob = { abort };
+  const what = direction === 'put' ? `${path.basename(local)} → ${host}:${remote}` : `${host}:${remote} → ${path.basename(local)}`;
+  scpLog({ ts: Date.now(), text: `Kopiere ${what} …`, kind: 'info' });
+  const t0 = Date.now();
+  try {
+    const r = await scpTransfer({ host, port, username: String(v.username), password: String(v.password || ''), legacy: Boolean(v.legacy), direction, local, remote }, {
+      hostKeys, signal: abort.signal,
+      askHostKey: (info) => ask('hostkey', info),
+      onProgress: (p) => send('scp:progress', p),
+    });
+    scpLog({ ts: Date.now(), text: `Fertig: ${what} (${fmtSize(r.size)} in ${((Date.now() - t0) / 1000).toFixed(1)} s)`, kind: 'ok' });
+    return r;
+  } catch (e) {
+    const msg = friendlyError(e);
+    scpLog({ ts: Date.now(), text: `Fehler: ${msg}`, kind: 'err' });
+    throw new Error(msg);
+  } finally {
+    scpJob = null;
+  }
+}
+
 function friendlyError(e) {
   const m = String((e && e.message) || e);
   if (/ECONNREFUSED/.test(m)) return 'Verbindung abgelehnt (Port geschlossen?)';
@@ -246,6 +317,24 @@ function registerIpc() {
     return r.canceled ? null : r.filePaths[0];
   });
   h('tftp:reveal', () => { if (store.data.tftp.root) shell.openPath(store.data.tftp.root); });
+  h('scp:status', () => scpStatus());
+  h('scp:start', (v) => scpStart(v));
+  h('scp:stop', () => scpStop());
+  h('scp:copy', (v) => scpCopy(v));
+  h('scp:cancel', () => { if (scpJob) scpJob.abort.abort(); });
+  h('scp:pick', async () => {
+    const r = await dialog.showOpenDialog(win, { title: 'Ordner für SCP freigeben', properties: ['openDirectory', 'createDirectory'] });
+    return r.canceled ? null : r.filePaths[0];
+  });
+  h('scp:pick-file', async () => {
+    const r = await dialog.showOpenDialog(win, { title: 'Datei zum Kopieren wählen', properties: ['openFile'] });
+    return r.canceled ? null : r.filePaths[0];
+  });
+  h('scp:pick-save', async ({ name }) => {
+    const r = await dialog.showSaveDialog(win, { title: 'Datei vom Gerät speichern unter', defaultPath: path.join(os.homedir(), 'Downloads', safeName(String(name || 'datei'))) });
+    return r.canceled || !r.filePath ? null : r.filePath;
+  });
+  h('scp:reveal', () => { if (store.data.scp.root) shell.openPath(store.data.scp.root); });
   h('session:delete', ({ id }) => store.deleteSession(id));
   h('session:forget-password', ({ id }) => { store.setSecret(id, null); const s = store.session(id); if (s) { s.savePassword = false; store.save(); } });
   h('snippets:save', (list) => store.setSnippets(list.items));
@@ -312,6 +401,8 @@ function createWindow() {
     }
     for (const c of conns.values()) c.conn.close();
     tftpStop();
+    scpStop();
+    if (scpJob) scpJob.abort.abort();
   });
   win.on('closed', () => { win = null; uiReady = false; });
 }
@@ -479,6 +570,7 @@ function buildMenu() {
     ] },
     { label: 'Werkzeuge', submenu: [
       { label: 'TFTP-Server …', accelerator: 'CmdOrCtrl+Shift+T', click: cmd('tftp') },
+      { label: 'SCP …', accelerator: 'CmdOrCtrl+Shift+U', click: cmd('scp') },
       { label: 'Befehlsbausteine ein/aus', accelerator: 'CmdOrCtrl+Shift+S', click: cmd('snippets') },
     ] },
     { role: 'windowMenu', label: 'Fenster' },

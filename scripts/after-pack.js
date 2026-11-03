@@ -26,7 +26,11 @@ exports.default = async function afterPack(context) {
     execFileSync('codesign', ['--force', '--sign', '-', f]);
   }
   const leak = /\/Users\/[^/\0]+\//;
-  const hits = [...walk(unpacked), path.join(res, 'app.asar')].filter((f) => leak.test(fs.readFileSync(f).toString('latin1')));
+  // Lokaler Build (install:local) trägt den Quellordner absichtlich in build-info.json ein („Nach Updates
+  // suchen“); nur der ist erlaubt. Release-Builds (CABLE_RELEASE=1) dürfen gar keinen /Users/-Pfad enthalten.
+  const own = process.env.CABLE_RELEASE === '1' ? null : path.resolve(__dirname, '..');
+  const text = (f) => { const t = fs.readFileSync(f).toString('latin1'); return own ? t.split(own).join('') : t; };
+  const hits = [...walk(unpacked), path.join(res, 'app.asar')].filter((f) => leak.test(text(f)));
   if (hits.length) throw new Error(`Persönliche Pfade in der App:\n${hits.map((f) => path.relative(res, f)).join('\n')}`);
-  console.log(`  • after-pack: ${native.length} native Module ohne Debug-Pfade, keine /Users/-Pfade in der App`);
+  console.log(`  • after-pack: ${native.length} native Module ohne Debug-Pfade, keine /Users/-Pfade in der App${own ? ' (außer Quellordner, lokaler Build)' : ''}`);
 };

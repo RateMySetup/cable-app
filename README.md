@@ -1,6 +1,6 @@
 # Cable
 
-**SSH, Telnet, Serial, Raw, lokale Shell und TFTP-Server in einem Fenster – eine PuTTY-Alternative für macOS,
+**SSH, Telnet, Serial, Raw, lokale Shell, TFTP und SCP in einem Fenster – eine PuTTY-Alternative für macOS,
 gebaut für die Arbeit mit Switches, Konsolenkabeln und vielen Sitzungen gleichzeitig.**
 
 ![Cable mit drei Sitzungen, Hervorhebung und Befehlsbausteinen](docs/screenshots/cable-dunkel.png)
@@ -9,7 +9,7 @@ gebaut für die Arbeit mit Switches, Konsolenkabeln und vielen Sitzungen gleichz
 
 Cable ist ein Terminal für Netzwerker. Ein Fenster statt fünf Programme: Konsolenkabel einstecken und
 loslegen, per SSH auf zehn Switches gleichzeitig, eine Konfiguration an alle schicken, Images per TFTP
-verteilen, die Ausgaben mitschreiben – ohne PuTTY, SecureCRT-Lizenz oder separaten TFTP-Server.
+verteilen, die Ausgaben mitschreiben – ohne PuTTY, SecureCRT-Lizenz oder separaten TFTP- und SCP-Server.
 
 Läuft unter macOS (Apple Silicon und Intel), dazu auch unter Linux und Windows. Kostenlos, MIT-Lizenz.
 
@@ -24,6 +24,7 @@ Läuft unter macOS (Apple Silicon und Intel), dazu auch unter Linux und Windows.
 | Befehlsbausteine | nein | über 50 Vorlagen (Cisco IOS/IOS-XE, NX-OS, ASA, Linux) mit Platzhaltern `{{Interface}}` |
 | Hervorhebung | nein | IPs, Modelle, Seriennummern, `down`, `err-disabled`, `% Invalid`, Syslog-Stufen farbig |
 | TFTP-Server | extra Programm | eingebaut, mit fertigen `copy tftp://…`-Befehlen |
+| SCP | extra Programm oder Terminal | eingebaut: Datei per IP, Benutzer und Passwort aufs Gerät kopieren, oder SCP-Server für `copy scp://…` |
 | Konsolenkabel | COM-Port von Hand | `/dev/cu.*` wird erkannt, 9600 8N1 vorbelegt, Break für ROMMON |
 | Passwörter | nicht speicherbar | nur auf Wunsch, verschlüsselt im macOS-Schlüsselbund |
 | Aufzeichnen | Logdatei je Sitzung | je Bereich ein Klick, mit Zeitstempel je Zeile |
@@ -44,7 +45,7 @@ Cable ist nicht von Apple signiert. Darum einmal den Quarantäne-Vermerk entfern
    xattr -dr com.apple.quarantine /Applications/Cable.app
    codesign --force --deep -s - /Applications/Cable.app
    ```
-3. Cable starten. Beim ersten TFTP-Start fragt macOS, ob Cable eingehende Verbindungen annehmen darf –
+3. Cable starten. Beim ersten Start des TFTP- oder SCP-Servers fragt macOS, ob Cable eingehende Verbindungen annehmen darf –
    erlauben, sonst erreichen die Switches den Server nicht.
 
 **Aus dem Quellcode** (bekommt dann auch Updates über „Hilfe → Nach Updates suchen“):
@@ -102,6 +103,7 @@ Wieder ausblenden: **Ablage → Staging-Konsolen entfernen**.
 | Bausteine | Über 50 Vorlagen mit Suche, mehrzeilig, Platzhalter `{{Name}}` oder `{{Name\|Vorgabe}}`; `{{TFTP-Server}}` wird mit der IP dieses Macs vorbelegt |
 | Aufzeichnen | Je Bereich „● Aufzeichnen“ (Zeitstempel je Zeile, in `~/Documents/Cable Logs`) und „⤓ Speichern“ (ganzer Verlauf) |
 | TFTP-Server | Ordner freigeben (Standard nur lesen), Port wählbar, Hochladen (Gerät → Mac) nur mit Häkchen und nie über bestehende Dateien. RFC 1350 mit blksize/tsize/timeout, Dateien über 32 MB |
+| SCP | Kopieren: Datei vom Mac aufs Gerät (z. B. Image nach `flash:`) oder vom Gerät holen, mit Ziel-IP, Benutzer, Passwort, Fortschritt und Host-Schlüssel-Prüfung; Passwort wird nicht gespeichert. Server: Ordner freigeben mit eigenem Benutzer und Passwort, Standard nur lesen, Hochladen nur mit Häkchen und nie über bestehende Dateien |
 | Sicherheit | Host-Schlüssel-Prüfung mit deutlicher Warnung bei Änderung; Passwörter nur verschlüsselt; Links öffnen nie ohne Bestätigung |
 | Hervorhebung | IPv4/IPv6, Hardwaremodelle (`C9300…`, `MS225…`), Seriennummern, MAC; Fehler rot, Warnungen gelb, `up`/`connected` grün. Regeln editierbar |
 | Import | `~/.ssh/config`, PuTTY-Sitzungen aus Windows (`.reg`-Export) |
@@ -109,7 +111,7 @@ Wieder ausblenden: **Ablage → Staging-Konsolen entfernen**.
 
 Tastatur: ⌘K Verbinden-Feld · ⌘T Shell · ⌘N neues Profil · ⌘D weiterer Bereich · ⌘⇧W Bereich schließen ·
 ⌘1–⌘4 Raster/Spalten/Zeilen/Fokus · ⌘⇧B an mehrere · ⌘⇧R aufzeichnen · ⌘S Verlauf speichern ·
-⌘⇧T TFTP · ⌘⇧S Bausteine · ⌘F suchen · ⌘⇧K Break · ⌘R neu verbinden · ⌘W Tab schließen · ⌘B Seitenleiste.
+⌘⇧T TFTP · ⌘⇧U SCP · ⌘⇧S Bausteine · ⌘F suchen · ⌘⇧K Break · ⌘R neu verbinden · ⌘W Tab schließen · ⌘B Seitenleiste.
 
 ![Vier Sitzungen im Raster, helles Design](docs/screenshots/cable-raster.png)
 
@@ -148,6 +150,7 @@ src/core/        reine Node-Logik, ohne Electron testbar
   telnet.js      Telnet-Parser und -Verhandlung
   autologin.js   Antwort auf „Username:“/„Password:“ bei Telnet und Serial
   tftp.js        TFTP-Server (RFC 1350/2347–2349), nur im freigegebenen Ordner
+  scp.js         SCP-Client (scp -t/-f über ssh2) und SCP-Server, nur im freigegebenen Ordner
   socks.js       SOCKS5 für dynamische Weiterleitung
   hostkeys.js    Host-Schlüssel (Trust on first use)
   store.js       Profile, Gruppen, Bausteine, Regeln, Einstellungen; Passwörter verschlüsselt getrennt

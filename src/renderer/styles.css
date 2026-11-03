@@ -179,7 +179,9 @@ body:not(.mac) #sidebar { padding-top: 10px; }
 .tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
 #btn-tftp { display: inline-flex; align-items: center; gap: 6px; }
 #tftp-dot { background: var(--muted); opacity: .45; width: 7px; height: 7px; }
-#tftp-dot.on { background: var(--ok); opacity: 1; }
+#tftp-dot.on, #scp-dot.on { background: var(--ok); opacity: 1; }
+#scp-dot { background: var(--muted); opacity: .45; width: 7px; height: 7px; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .seg { display: inline-flex; background: var(--hover); border-radius: 9px; padding: 2px; gap: 2px; }
 .seg button { border: 0; background: none; border-radius: 7px; padding: 4px 9px; color: var(--muted); }
 .seg button:hover { color: var(--text); background: none; }
