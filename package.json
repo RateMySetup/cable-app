@@ -25,7 +25,7 @@
     "install:local": "bash scripts/install-local.sh",
     "update:local": "bash scripts/install-local.sh --pull",
     "publish:public": "bash scripts/publish-public.sh",
-    "dist:release": "CABLE_RELEASE=1 npm run build:renderer && electron-builder --mac dmg --arm64"
+    "dist:release": "CABLE_RELEASE=1 npm run build:renderer && CABLE_RELEASE=1 electron-builder --mac dmg --arm64"
   },
   "dependencies": {
     "node-pty": "1.1.0",
