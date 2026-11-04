@@ -3,6 +3,11 @@
 **SSH, Telnet, Serial, Raw, lokale Shell, TFTP und SCP in einem Fenster – eine PuTTY-Alternative für macOS,
 gebaut für die Arbeit mit Switches, Konsolenkabeln und vielen Sitzungen gleichzeitig.**
 
+
+https://github.com/user-attachments/assets/86aaacaa-acc2-4ed2-a3ce-9c31d07525c5
+
+
+
 [![Video: Cable in 20 Sekunden – ein Befehl an acht Switches](docs/video/cable-in-20-sekunden.jpg)](docs/video/cable-in-20-sekunden.mp4)
 
 ▶ **Cable in 20 Sekunden** (mit Ton): [Video ansehen](docs/video/cable-in-20-sekunden.mp4) – ein Befehl an acht Switches,
